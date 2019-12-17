@@ -407,7 +407,7 @@ Roy Fielding은 웹을 성공적으로 만들었던 기술로 API를 만드는 �
 애플리케이션을 다시 시작하고 Bilbo의 직원 기록을 쿼리한다면, 이전과 약간 다른 응답을 받게 될 것입니다:
 
 `RESTful representation of a single employee`
-```console
+```json
 {
   "id": 1,
   "name": "Bilbo Baggins",
@@ -455,7 +455,7 @@ Resources<Resource<Employee>> all() {
 애플리케이션을 재시작하고 aggregate root를 가져오게 되면 다음과 같은 결과를 보게 됩니다:
 
 `RESTful representation of a collection of employee resources`
-```console
+```json
 {
   "_embedded": {
     "employeeList": [
@@ -530,7 +530,718 @@ class EmployeeResourceAssembler implements ResourceAssembler<Employee, Resource<
 }
 ```
 
+이 간단한 인터페이스는 한 개의 메서드를 가지고 있습니다: `toResource()`. 이 메서드는 비-resource 객체 (`Employee`)를 resource 기반의 객체 (`Resource<Employee>`)로 변환해줍니다.
 
+이전에 봤었던 컨트롤러 코드가 이 클래스 안으로 옮겨질 수 있습니다. 그리고 Spring Framework의 `@Component`를 적용하여 앱이 시작할 때 이 컴포넌트가 자동으로 생성될 것입니다.
+
+> Spring HATEOAS에서 모든 Resource에 대한 추상 베이스 클래스는 `ResourceSupport`입니다. 하지만 명료함을 위해, 모든 POJO를 쉽게 감싸는 방법으로 `Resource<T>`의 사용을 권장합니다.
+
+이 assembler를 활용하기 위해서 `EmployeeController`의 생성자 안에 assembler를 주입하는 방식으로 변경하면 됩니다.
+
+`Injecting EmployeeResourceAssembler into the controller`
+```java
+@RestController
+class EmployeeController {
+
+  private final EmployeeRepository repository;
+
+  private final EmployeeResourceAssembler assembler;
+
+  EmployeeController(EmployeeRepository repository,
+             EmployeeResourceAssembler assembler) {
+
+    this.repository = repository;
+    this.assembler = assembler;
+  }
+
+  ...
+
+}
+```
+
+지금부터 단일 직원을 가져오는 메서드에서 사용할 수 있습니다.
+
+`Getting single item resource using the assembler`
+```java
+@GetMapping("/employees/{id}")
+Resource<Employee> one(@PathVariable Long id) {
+
+  Employee employee = repository.findById(id)
+    .orElseThrow(() -> new EmployeeNotFoundException(id));
+
+  return assembler.toResource(employee);
+}
+```
+
+이 코드는 거의 같은데, `Resource<Employee>` 인스턴스를 여기서 생성하지 않고 assembler에 대리해주는 점만 다릅니다. 별로 다른 건 없어보이죠?
+
+Aggregate root 컨트롤러 메서드에 같은 방식을 적용하는 것은 더 인상적인 결과를 보여줍니다:
+
+`Getting aggregate root resource using the assembler`
+```java
+@GetMapping("/employees")
+Resources<Resource<Employee>> all() {
+
+  List<Resource<Employee>> employees = repository.findAll().stream()
+    .map(assembler::toResource)
+    .collect(Collectors.toList());
+
+  return new Resources<>(employees,
+    linkTo(methodOn(EmployeeController.class).all()).withSelfRel());
+}
+```
+
+이 코드도 마찬가지로 거의 같은데, `Resource<Employee>` 생성 로직을 `map(assembler::toResource)`로 바꾼 점이 다릅니다. Java 8 메서드 참조 덕분에 이렇게 쉽게 끼워넣어 컨트롤러를 간단히 만들 수 있습니다.
+
+> Spring HATEOAS의 중요 목표는 "올바른 것"을 쉽게 하는 것입니다. 이 시나리오에서는 하드코딩 하나 없이 하이퍼미디어를 서비스에 추가하였습니다.
+
+이 단계에서 당신은 실제로 하이퍼미디어 기반 컨텐츠를 생성하는 Spring MVC REST 컨트롤러를 만들었습니다. HAL을 모르는 클라이언트는 추가적인 부분을 무시하고 순수 데이터만 사용하면 됩니다. HAL을 아는 클라이언트는 더 나아진 API를 탐색할 수 있겠죠.
+
+그렇지만 이건 Spring을 이용해서 진정한 RESTful 서비스를 만들기 위해 필요한 것 중 하나일 뿐입니다.
+
+# Evolving REST APIs
+
+라이브러리 한 개를 추가하고 몇 줄의 코드를 작성하여 당신의 애플리케이션에 하이퍼미디어를 추가하였습니다. 하지만 이게 당신의 서비스를 RESTful하게 만들기 위한 유일한 재료는 아닙니다. REST의 중요한 측면은 이게 기술 스택이나 어떠한 표준이 아니라는 점입니다.
+
+REST는 구조적 제약을 모아둔 것으로, 애플리케이션에 적용 되었을 때 더욱 탄력적으로 (resilient) 만들게 해줍니다. 탄력의 중요한 점은, 당신의 서비스를 업그레이드 하였을 때, 클라이언트가 다운타임 (downtime)으로 인해 피해를 받지 않는다는 점입니다.
+
+"지난 날"에는, 업그레이드라는 것은 클라이언트를 고장나게 하는 것으로 악명이 높았습니다. 즉, 서버가 업그레이드하려면 클라이언트도 업그레이드되어야 했었습니다. 요즘 시대에는, 업그레이드로 인한 수 시간 수 분 동안의 다운타임이 몇 십억원의 매출 손실로 이어질 수 있습니다.
+
+몇몇 회사들은 다운타임을 최소화하기 위한 계획을 경영진에게 제시하도록 요구합니다. 예전에는, 부하가 가장 최소화되는 월요일 오전 2시에 업그레이드할 수 있었습니다. 하지만 현시대에 이르러는 외국 고객들이 있는 인터넷 기반 전자상거래에서 이런 전략이 효과적이지 못합니다.
+
+SOAP 기반 서비스와 CORBA 기반 서비스는 믿을 수 없을 정도로 취약했습니다. 예전 클라이언트와 새로운 클라이언트를 모두 지원하는 서버를 롤아웃하기 힘들었습니다. REST 기반에서는 훨씬 쉽습니다. Spring 스택을 사용한다면 더욱 더요.
+
+이 설계 문제를 생각해봅시다: `Employee` 기반 기록 시스템을 롤아웃하였습니다. 이 시스템이 히트를 쳤습니다. 수많은 기업에 이 시스템을 팔았습니다. 갑자기, 직원 이름을 `firstName`과 `lastName`으로 나눠야 하는 필요성이 생겼습니다.
+
+어, 이 생각은 못했네.
+
+자 `Employee` 클래스를 열어서 `name` 필드를 `firstName`과 `lastName`으로 교체하기 전에, 잠깐 멈춰서 생각해보세요. 이게 어떤 클라이언트를 고장나게 할까요? 그 클라이언트를 업그레이드하는 데 얼마나 시간이 걸릴까요? 심지어, 당신 서비스에 접근하는 모든 클라이언트를 다 제어하나요?
+
+다운타임 = 금전적 손실. 경영진이 이걸 받아들일 준비가 되어 있을까요?
+
+REST가 나오기 수 년 전부터 있었던 오래된 전략이 하나 있습니다.
+
+> 데이터베이스에서 column을 절대 지우지 마라. - 알 수 없는 이.
+
+데이터베이스 테이블에 항상 column이나 필드를 넣을 수 있습니다. 하지만 지우면 안 됩니다. RESTful 서비스의 원칙도 같습니다. 다음과 같이, JSON 표현에 새로운 필드를 넣기만 하고, 지우면 안됩니다:
+
+``
+```json
+{
+  "id": 1,
+  "firstName": "Bilbo",
+  "lastName": "Baggins",
+  "role": "burglar",
+  "name": "Bilbo Baggins",
+  "_links": {
+    "self": {
+      "href": "http://localhost:8080/employees/1"
+    },
+    "employees": {
+      "href": "http://localhost:8080/employees"
+    }
+  }
+}
+```
+
+이 형식에서 `firstName`, `lastName`, `name`을 어떻게 나타내는지 보이시나요? 정보의 중복을 보여주긴 하지만, 예전과 새로운 클라이언트 모두를 지원하는 목적을 가집니다. 다운타임을 줄일 만한 좋은 조치죠.
+
+"이전 방식"과 "새로운 방식" 모두에서 이 정보를 보여줘야 하기도 하지만, 두 방식으로 들어오는 데이터를 처리해야 합니다.
+
+어떻게요? 간단해요. 이렇게요:
+
+`Employee record that handles both "old" and "new" clients`
+```java
+package payroll;
+
+import lombok.Data;
+
+import javax.persistence.Entity;
+import javax.persistence.GeneratedValue;
+import javax.persistence.Id;
+
+@Data
+@Entity
+class Employee {
+
+  private @Id @GeneratedValue Long id;
+  private String firstName;
+  private String lastName;
+  private String role;
+
+  Employee() {}
+
+  Employee(String firstName, String lastName, String role) {
+    this.firstName = firstName;
+    this.lastName = lastName;
+    this.role = role;
+  }
+
+  public String getName() {
+    return this.firstName + " " + this.lastName;
+  }
+
+  public void setName(String name) {
+    String[] parts =name.split(" ");
+    this.firstName = parts[0];
+    this.lastName = parts[1];
+  }
+}
+```
+
+이전 버전의 `Employee`와 굉장히 비슷한 클래스입니다. 변화점을 하나씩 살펴봅시다:
+
+- `name` 필드는 `firstName`과 `lastName`으로 교체되었습니다. Lombok이 이 필드에 대한 getter와 setter를 생성할 것입니다.
+- 기존의 `name` 특성을 위한 "가상" getter로 `getName()`이 정의되었습니다. 이 메서드는 `firstName`과 `lastName` 필드를 이용해 값을 만들어냅니다.
+- 기존의 `name` 특성을 위한 "가상" setter도 `setName()`에서 정의되었습니다. 들어오는 스트링을 파싱해서 알맞은 필드에 저장합니다.
+
+물론 모든 API의 변화가 스트링을 분리하거나 합치는 것처럼 간단하진 않겠죠. 하지만 대부분의 상황에서 변환을 할 수 있는게 불가능하진 않다는 게 확실하지 않나요?
+
+또 다른 미세 조정 방법으로는 각각의 REST 메서드가 적합한 응답을 리턴하도록 보장하는 것이 있습니다.
+POST 메서드를 이렇게 업데이트하세요:
+
+`POST that handles "old" and "new" client requests`
+```java
+@PostMapping("/employees")
+ResponseEntity<?> newEmployee(@RequestBody Employee newEmployee) throws URISyntaxException {
+
+  Resource<Employee> resource = assembler.toResource(repository.save(newEmployee));
+
+  return ResponseEntity
+    .created(new URI(resource.getId().expand().getHref()))
+    .body(resource);
+}
+```
+
+- 새로운 `Employee` 객체가 이전과 같은 방식으로 저장되었습니다. 하지만 `EmployeeResourceAssembler`로 감싸졌습니다.
+- Spring MVC의 `ResponseEntity`는 HTTP 201 Create 상태 메시지를 만들기 위해 사용되었습니다. 이러한 종류의 응답은 보통 Location 응답 헤더를 포함하고, 우리는 새롭게 만들어진 링크를 사용합니다.
+- 추가적으로, 저장된 객체를 resource 기반 버전으로 리턴합니다.
+
+이 변화를 적용하면, 같은 방식으로 레거시인 `name` 필드를 사용해서 새로운 직원 데이터를 만들수 있습니다:
+
+```console
+$ curl -v -X POST localhost:8080/employees -H 'Content-Type:application/json' -d '{"name": "Samwise Gamgee", "role": "gardener"}'
+```
+
+출력 결과는 다음과 같습니다:
+
+```console
+> POST /employees HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/7.54.0
+> Accept: */*
+> Content-Type:application/json
+> Content-Length: 46
+>
+< Location: http://localhost:8080/employees/3
+< Content-Type: application/hal+json;charset=UTF-8
+< Transfer-Encoding: chunked
+< Date: Fri, 10 Aug 2018 19:44:43 GMT
+<
+{
+  "id": 3,
+  "firstName": "Samwise",
+  "lastName": "Gamgee",
+  "role": "gardener",
+  "name": "Samwise Gamgee",
+  "_links": {
+    "self": {
+      "href": "http://localhost:8080/employees/3"
+    },
+    "employees": {
+      "href": "http://localhost:8080/employees"
+    }
+  }
+}
+```
+
+결과물 객체가 HAL로 렌더된 것 뿐만 아니라 (`name`과 `firstName`/`lastName` 모두), Location 헤더가 `http://localhost:8080/employees/3`에 생성된 것을 볼 수 있습니다. 하이퍼미디어를 사용하는 클라이언트가 이 새로운 자원을 탐색하고 사용을 시작할 수 있습니다.
+
+PUT 컨트롤러 메서드에도 비슷한 변화가 필요합니다:
+
+`Handling a PUT for different clients`
+```java
+@PutMapping("/employees/{id}")
+ResponseEntity<?> replaceEmployee(@RequestBody Employee newEmployee, @PathVariable Long id) throws URISyntaxException {
+
+  Employee updatedEmployee = repository.findById(id)
+    .map(employee -> {
+      employee.setName(newEmployee.getName());
+      employee.setRole(newEmployee.getRole());
+      return repository.save(employee);
+    })
+    .orElseGet(() -> {
+      newEmployee.setId(id);
+      return repository.save(newEmployee);
+    });
+
+  Resource<Employee> resource = assembler.toResource(updatedEmployee);
+
+  return ResponseEntity
+    .created(new URI(resource.getId().expand().getHref()))
+    .body(resource);
+}
+```
+
+`save()`를 통해 만들어진 `Employee` 객체는 `EmployeeResourceAssembler`를 이용해 `Resource<Employee>` 객체로 감싸지게 됩니다. 200 OK보다는 더 자세한 HTTP 응답 코드가 필요하기 때문에, Spring MVC의 `ResponseEntity` 래퍼를 사용하겠습니다. 여기엔 유용한 정적 메서드인 `created()`가 있어 이 안에 resource URI를 집어넣을 수 있습니다.
+
+`resource` 를 가져오면 거기에 `getId()` 메서드를 호출해 self 링크를 가져올 수 있습니다. 이 메서드는 `Link`를 얻게 되는데 이걸 Java `URI`로 만들 수 있습니다. 잘 묶어서 보기 위해 `resource` 자체를 `body()` 메서드 안에 주입합니다.
+
+> REST에서는 resource의 URI가 그 resource의 id입니다. 그러므로, Spring HATEOAS는 기저 데이터 타입의 `id` 필드를 직접 건네주지 않습니다 (어떤 클라이언트도 그러면 안되죠). 대신 URI를 넘겨줍니다. `ResourceSupport.getId()`와 `Employee.getId()`를 헷갈리지 마세요.
+
+우리가 항상 새로운 resource를 "생성"하진 않는데, HTTP 201 Created가 과연 적합한 시맨틱을 가지고 있는지는 논란의 여지가 있습니다. 하지만 Location 응답 헤더와 함께 pre-load되기 때문에 run 시킵니다.
+
+```console
+$ curl -v -X PUT localhost:8080/employees/3 -H 'Content-Type:application/json' -d '{"name": "Samwise Gamgee", "role": "ring bearer"}'
+
+* TCP_NODELAY set
+* Connected to localhost (::1) port 8080 (#0)
+> PUT /employees/3 HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/7.54.0
+> Accept: */*
+> Content-Type:application/json
+> Content-Length: 49
+>
+< HTTP/1.1 201
+< Location: http://localhost:8080/employees/3
+< Content-Type: application/hal+json;charset=UTF-8
+< Transfer-Encoding: chunked
+< Date: Fri, 10 Aug 2018 19:52:56 GMT
+{
+	"id": 3,
+	"firstName": "Samwise",
+	"lastName": "Gamgee",
+	"role": "ring bearer",
+	"name": "Samwise Gamgee",
+	"_links": {
+		"self": {
+			"href": "http://localhost:8080/employees/3"
+		},
+		"employees": {
+			"href": "http://localhost:8080/employees"
+		}
+	}
+}
+```
+
+그 직원 resource가 이제 업데이트 되었고 location URI가 되돌려 보내졌습니다. 마지막으로, DELETE 동작을 적절히 업데이트 하세요:
+
+`Handling DELETE requests`
+```java
+@DeleteMapping("/employees/{id}")
+ResponseEntity<?> deleteEmployee(@PathVariable Long id) {
+
+  repository.deleteById(id);
+
+  return ResponseEntity.noContent().build();
+}
+```
+
+이건 HTTP 204 No Content 응답을 리턴합니다.
+
+```console
+$ curl -v -X DELETE localhost:8080/employees/1
+
+* TCP_NODELAY set
+* Connected to localhost (::1) port 8080 (#0)
+> DELETE /employees/1 HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/7.54.0
+> Accept: */*
+>
+< HTTP/1.1 204
+< Date: Fri, 10 Aug 2018 21:30:26 GMT
+```
+
+> `Employee` 클래스의 필드를 바꾸려면 데이터베이스 팀과 협업이 필요할 것입니다. 그래야 그들이 기존 데이터를 새로운 column에 제대로 마이그레이션할 수 있습니다.
+
+당신은 이제 기존 클라이언트를 방해하지 않으면서, 새로운 클라이언트가 개선된 기능을 사용할 수 있도록 해주는 업그레이드를 위한 모든 준비가 완료 되었습니다!
+
+그나저나, 너무 많은 정보를 보내는 것 같이서 걱정되진 않으신가요? 바이트 하나하나가 아까운 시스템에서는 API 진화를 살짝 늦춰야할 때도 있습니다. 하지만 실제로 측정해보기 전까진 미리 최적화를 해보진 마세요.
+
+# Building links into your REST API
+
+지금까지, 뼈대만 있는 링크를 가진 진화 가능한 API를 만들어 봤습니다. API를 더 키우고 클라이언트를 더 잘 서빙하기 위해서 "애플리케이션 상태 엔진으로써의 하이퍼미디어"라는 컨셉을 받아들여야 합니다.
+
+이게 무슨 뜻일까요? 이 섹션에서 자세히 알아볼 겁니다.
+
+비즈니스 로직은 프로세스와 연관된 규칙을 어쩔 수 없이 쌓게 됩니다. 이런 시스템의 위험성은, 바로 서버사이드 로직을 클라이언트로 가져와 강력한 커플링을 만들 수 있다는 점입니다. REST는 이런 연결성을 끊어내고 커플링을 최소화하는 것에 관련 있습니다.
+
+클라이언트의 고장을 유발하지 않으면서 상태 변화를 해결하는 방법을 보여주기 위해, 주문을 이행하는 시스템을 추가한다고 가정해봅시다.
+
+첫 번째 단계로, `Order` 기록을 정의합니다:
+
+`links/src/main/java/payroll/Order.java`
+```java
+package payroll;
+
+import lombok.Data;
+
+import javax.persistence.Entity;
+import javax.persistence.GeneratedValue;
+import javax.persistence.Id;
+import javax.persistence.Table;
+
+@Entity
+@Data
+@Table(name = "CUSTOMER_ORDER")
+class Order {
+
+  private @Id @GeneratedValue Long id;
+
+  private String description;
+  private Status status;
+
+  Order() {}
+
+  Order(String description, Status status) {
+
+    this.description = description;
+    this.status = status;
+  }
+}
+```
+
+- 이 클래스에는 테이블 이름을 `CUSTOMER_ORDER`로 바꾸기 위해 JPA `@Table` 애너테이션이 필요한데, 이는 `ORDER`이 테이블 이름으로 유효하지 않기 때문입니다.
+- `description` 필드와 `status` 필드를 갖고 있습니다.
+
+주문은 고객이 주문을 넣었을 때와 이행이 되거나 취소되었을 때 여러 상태 변이를 하게 됩니다. 이는 Java `enum`으로 표현될 수 있습니다:
+
+`links/src/main/java/payroll/Status.java`
+```java
+package payroll;
+
+enum Status {
+
+  IN_PROGRESS,
+  COMPLETED,
+  CANCELLED;
+}
+```
+
+이 `enum`은 `Order`이 가질 수 있는 여러 상태를 나타냅니다. 이 튜토리얼에서는 간단하게 표현하겠습니다.
+
+데이터베이스에 있는 주문과 상호작용을 지원하려면 대응되는 Spring Data 저장소를 반드시 정의해야 합니다:
+
+Spring Data JPA’s `JpaRepository` base interface
+```java
+interface OrderRepository extends JpaRepository<Order, Long> {
+}
+```
+
+이걸 제 자리에 넣었다면, 이제 기본적인 `OrderController`를 정의할 수 있습니다:
+
+`links/src/main/java/payroll/OrderController.java`
+```java
+@RestController
+class OrderController {
+
+  private final OrderRepository orderRepository;
+  private final OrderResourceAssembler assembler;
+
+  OrderController(OrderRepository orderRepository,
+          OrderResourceAssembler assembler) {
+
+    this.orderRepository = orderRepository;
+    this.assembler = assembler;
+  }
+
+  @GetMapping("/orders")
+  Resources<Resource<Order>> all() {
+
+    List<Resource<Order>> orders = orderRepository.findAll().stream()
+      .map(assembler::toResource)
+      .collect(Collectors.toList());
+
+    return new Resources<>(orders,
+      linkTo(methodOn(OrderController.class).all()).withSelfRel());
+  }
+
+  @GetMapping("/orders/{id}")
+  Resource<Order> one(@PathVariable Long id) {
+    return assembler.toResource(
+      orderRepository.findById(id)
+        .orElseThrow(() -> new OrderNotFoundException(id)));
+  }
+
+  @PostMapping("/orders")
+  ResponseEntity<Resource<Order>> newOrder(@RequestBody Order order) {
+
+    order.setStatus(Status.IN_PROGRESS);
+    Order newOrder = orderRepository.save(order);
+
+    return ResponseEntity
+      .created(linkTo(methodOn(OrderController.class).one(newOrder.getId())).toUri())
+      .body(assembler.toResource(newOrder));
+  }
+}
+```
+
+- 이는 지금까지 당신이 만들었던 컨트롤러와 같은 REST 컨트롤러 설정을 담고 있습니다.
+- `OrderRepository`와 `OrderResourceAssembler` (아직 만들진 않았지만)를 주입합니다.
+- 처음 두 Spring MVC route들이 aggregate root와 단일 `Order` resource 요청을 처리합니다.
+- 세 번째 Spring MVC route는 `IN_PROGRESS` 상태로 시작는 새 주문의 생성을 처리합니다.
+- 모든 컨트롤러 메서드는 하이퍼미디어 (혹은 그런 타입의 래퍼)를 제대로 렌더링 해주기 위하여 Spring HATEOAS의 `ResourceSupport` 서브클래스 중 하나를 리턴합니다.
+
+`OrderResourceAssembler`를 만들기 전에, 어떤 일이 일어나야 하는지 논의해봅시다. 당신은 지금 `Status.IN_PROGRESS`, `Status.COMPLETED`, `Status.CANCELLED` 간의 상태 흐름을 모델화하고 있습니다. 이런 데이터를 클라이언트에 서빙할 경우, 클라이언트가 이 payload를 기반으로 뭘 할지 직접 결정하게 하도록 하는 것을 자연스럽게 떠올리게 됩니다.
+
+하지만 그건 잘못되었을 수 있습니다.
+
+이 흐름에 새로운 상태가 추가되면 어떤 일이 벌어질까요? UI의 다양한 버튼 배치가 에러를 나타낼 것입니다.
+
+만약 외국어 지원을 하거나, locale-specific한 텍스트를 보여주기 위해 각 상태의 이름을 바꿨다면 어떻게 될까요? 이건 모든 클라이언트의 장애를 일으킬 가능성이 높습니다.
+
+HATEOAS (Hypermedia as the Engine of Application State)로 오세요. 클라이언트가 payload를 파싱하는 대신 유효한 동작을 나타내기 위해 링크를 주세요. 상태 기반 동작과 데이터 payload 간의 커플링을 제거하세요. 다시 말해, CANCEL과 COMPLETE이 유효한 동작이라면, 링크 리스트에 동적으로 추가하세요. 클라이언트는 링크가 존재할 때만 해당하는 버튼을 유저에게 보여주게 됩니다.
+
+이는 클라이언트가 "언제" 동작이 유효한지 알 필요가 없도록 커플링을 제거해주어, 서버와 클라이언트 사이의 상태 전이 로직이 싱크가 맞지 않을 위험을 낮춰줍니다.
+
+Spring HATEOAS의 `ResourceAssembler` component 컨셉을 받아들였으니, 그런 로직을 `OrderResourceAssembler`에 넣으면 됩니다:
+
+`links/src/main/java/payroll/OrderResourceAssembler.java`
+```java
+package payroll;
+
+import static org.springframework.hateoas.mvc.ControllerLinkBuilder.*;
+
+import org.springframework.hateoas.Resource;
+import org.springframework.hateoas.ResourceAssembler;
+import org.springframework.stereotype.Component;
+
+@Component
+class OrderResourceAssembler implements ResourceAssembler<Order, Resource<Order>> {
+
+  @Override
+  public Resource<Order> toResource(Order order) {
+
+    // Unconditional links to single-item resource and aggregate root
+
+    Resource<Order> orderResource = new Resource<>(order,
+      linkTo(methodOn(OrderController.class).one(order.getId())).withSelfRel(),
+      linkTo(methodOn(OrderController.class).all()).withRel("orders")
+    );
+
+    // Conditional links based on state of the order
+
+    if (order.getStatus() == Status.IN_PROGRESS) {
+      orderResource.add(
+        linkTo(methodOn(OrderController.class)
+          .cancel(order.getId())).withRel("cancel"));
+      orderResource.add(
+        linkTo(methodOn(OrderController.class)
+          .complete(order.getId())).withRel("complete"));
+    }
+
+    return orderResource;
+  }
+}
+```
+
+이 resource assembler는 단일 resource에 거는 self 링크와 aggregate root에 거는 링크를 항상 포함하게 됩니다. 이것은 또한 `OrderController.cancel(id)`와 `OrderController.complete(id)`
+ (아직 정의되지 않음)에 대한 두 개의 조건부 링크를 포함합니다. 이 링크들은 주문의 상태가 `Status.IN_PROGRESS`일 때만 보이게 됩니다.
+
+만약 클라이언트가 단순이 plain old JSON 데이터를 읽는 게 아니라, HAL을 적용하여 링크를 읽을 수 있다면, 주문 시스템에 대한 도메인 지식을 알 필요성이 줄어들게 됩니다. 이는 자연스럽게 클라이언트와 서버 사이의 커플링을 줄여줍니다. 그리고 이것은 실행 중인 클라이언트에서 장애가 없도록 주문 이행의 흐름을 조정할 수 있게 해줍니다.
+
+`cancel` 작업을 위해 다음 코드를 `OrderController`에 넣어 주문 이행을 손봅시다:
+
+`Creating a "cancel" operation in the OrderController`
+```java
+@DeleteMapping("/orders/{id}/cancel")
+ResponseEntity<ResourceSupport> cancel(@PathVariable Long id) {
+
+  Order order = orderRepository.findById(id).orElseThrow(() -> new OrderNotFoundException(id));
+
+  if (order.getStatus() == Status.IN_PROGRESS) {
+    order.setStatus(Status.CANCELLED);
+    return ResponseEntity.ok(assembler.toResource(orderRepository.save(order)));
+  }
+
+  return ResponseEntity
+    .status(HttpStatus.METHOD_NOT_ALLOWED)
+    .body(new VndErrors.VndError("Method not allowed", "You can't cancel an order that is in the " + order.getStatus() + " status"));
+}
+```
+
+이 코드는 `Order`의 취소를 승인하기 전에 그 상태를 검사합니다. 만약 유효한 상태가 아니라면, 하이퍼미디어를 지원하는 에러 컨테이더나인 Spring HATEOAS `VndError`를 리턴합니다. 만약 전이가 유효하다면, `Order`의 상태를 `CANCELLED`로 변경합니다.
+
+주문 완료를 구현하기 위해 다음과 같은 코드를 `OrderController`에 추가하세요:
+
+`Creating a "complete" operation in the OrderController`
+```java
+@PutMapping("/orders/{id}/complete")
+ResponseEntity<ResourceSupport> complete(@PathVariable Long id) {
+
+    Order order = orderRepository.findById(id).orElseThrow(() -> new OrderNotFoundException(id));
+
+    if (order.getStatus() == Status.IN_PROGRESS) {
+      order.setStatus(Status.COMPLETED);
+      return ResponseEntity.ok(assembler.toResource(orderRepository.save(order)));
+    }
+
+    return ResponseEntity
+      .status(HttpStatus.METHOD_NOT_ALLOWED)
+      .body(new VndErrors.VndError("Method not allowed", "You can't complete an order that is in the " + order.getStatus() + " status"));
+}
+```
+
+`Order` 상태가 적절한 상태가 아닌 이상 주문을 완료하지 못하도록 방지하는 비슷한 로직이 구현되었습니다.
+
+`LoadDatabase`에 다음과 같이 짧은 초기화 코드를 넣는다면:
+
+`Updating the database pre-loader`
+```java
+orderRepository.save(new Order("MacBook Pro", Status.COMPLETED));
+orderRepository.save(new Order("iPhone", Status.IN_PROGRESS));
+
+orderRepository.findAll().forEach(order -> {
+  log.info("Preloaded " + order);
+});
+```
+
+이제 테스트를 할 수 있어요!
+
+새로 단장된 주문 서비스를 사용하기 위해서는 그냥 몇 개의 동작을 수행하세요:
+
+```console
+$ curl -v http://localhost:8080/orders
+
+{
+  "_embedded": {
+    "orderList": [
+      {
+        "id": 3,
+        "description": "MacBook Pro",
+        "status": "COMPLETED",
+        "_links": {
+          "self": {
+            "href": "http://localhost:8080/orders/3"
+          },
+          "orders": {
+            "href": "http://localhost:8080/orders"
+          }
+        }
+      },
+      {
+        "id": 4,
+        "description": "iPhone",
+        "status": "IN_PROGRESS",
+        "_links": {
+          "self": {
+            "href": "http://localhost:8080/orders/4"
+          },
+          "orders": {
+            "href": "http://localhost:8080/orders"
+          },
+          "cancel": {
+            "href": "http://localhost:8080/orders/4/cancel"
+          },
+          "complete": {
+            "href": "http://localhost:8080/orders/4/complete"
+          }
+        }
+      }
+    ]
+  },
+  "_links": {
+    "self": {
+      "href": "http://localhost:8080/orders"
+    }
+  }
+}
+```
+
+이 HAL 문서는 각 주문의 현재 상태에 따라 다른 링크를 곧바로 보여줍니다.
+
+- 첫 번째 주문은 `COMPLETED` 상태이고 탐색 링크만 가지고 있습니다. 상태 전이 링크들은 안보여집니다.
+- 두 번째 주문은 `IN_PROGRESS` 상태이고 `cancel` 링크와 `complete` 링크를 추가적으로 갖고 있습니다.
+
+주문 취소를 해볼까요:
+
+```console
+$ curl -v -X DELETE http://localhost:8080/orders/4/cancel
+
+> DELETE /orders/4/cancel HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/7.54.0
+> Accept: */*
+>
+< HTTP/1.1 200
+< Content-Type: application/hal+json;charset=UTF-8
+< Transfer-Encoding: chunked
+< Date: Mon, 27 Aug 2018 15:02:10 GMT
+<
+{
+  "id": 4,
+  "description": "iPhone",
+  "status": "CANCELLED",
+  "_links": {
+    "self": {
+      "href": "http://localhost:8080/orders/4"
+    },
+    "orders": {
+      "href": "http://localhost:8080/orders"
+    }
+  }
+}
+```
+
+이 응답은 HTTP 200 상태 코드를 보여주는데, 성공했다는 의미입니다. 응답 HAL 문서는 이 주문이 새로운 상태인 `CANCELLED`가 되었다는걸 보여주네요. 그리고 상태 전이 링크는 사라졌습니다.
+
+같은 동작을 다시 한다면...
+
+```console
+$ curl -v -X DELETE http://localhost:8080/orders/4/cancel
+
+* TCP_NODELAY set
+* Connected to localhost (::1) port 8080 (#0)
+> DELETE /orders/4/cancel HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/7.54.0
+> Accept: */*
+>
+< HTTP/1.1 405
+< Content-Type: application/hal+json;charset=UTF-8
+< Transfer-Encoding: chunked
+< Date: Mon, 27 Aug 2018 15:03:24 GMT
+<
+{
+  "logref": "Method not allowed",
+  "message": "You can't cancel an order that is in the CANCELLED status"
+}
+```
+
+... HTTP 405 Method Not Allowed 응답을 보게 됩니다. DELETE이 이제 유효하지 않은 동작이 되었어요. `VndError` 응답 객체는 이미 `CANCELLED` 상태인 주문을 취소할 수 없다고 분명히 나타내고 있습니다.
+
+추가적으로, 같은 주문을 완료 처리 하는 것도 실패하게 됩니다:
+
+```console
+$ curl -v -X PUT localhost:8080/orders/4/complete
+
+* TCP_NODELAY set
+* Connected to localhost (::1) port 8080 (#0)
+> PUT /orders/4/complete HTTP/1.1
+> Host: localhost:8080
+> User-Agent: curl/7.54.0
+> Accept: */*
+>
+< HTTP/1.1 405
+< Content-Type: application/hal+json;charset=UTF-8
+< Transfer-Encoding: chunked
+< Date: Mon, 27 Aug 2018 15:05:40 GMT
+<
+{
+  "logref": "Method not allowed",
+  "message": "You can't complete an order that is in the CANCELLED status"
+}
+```
+
+이제 모든 것이 갖춰졌고, 당신의 주문 이행 서비스는 어떤 동작이 가능한지 조건부로 보여줄 수 있게 되었습니다. 유효하지 않은 동작에 대한 방어도 되었네요.
+
+하이퍼미디어와 링크 프로토콜을 사용함으로써, 클라이언트는 더욱 견고해졌고, 단순히 테이터에 변경이 있었다고 해서 장애가 나타날 확률이 적어졌습니다. Spring HATEOAS는 클라이언트에 서빙해야 하는 하이퍼미디어를 만드는 것을 쉽게 해주었습니다.
+
+# 요약
+
+이 튜토리얼을 통해 REST API를 반들기 위한 여러 전략을 체험해봤습니다. REST는 그냥 pretty URI나 XML 대신 JSON을 리턴하는 개념이 아니란 걸 알게 되었습니다.
 
 
 
