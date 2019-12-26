@@ -122,9 +122,10 @@ class LoadDatabase {
 }
 ```
 
-이렇게 로딩이 될 때 무슨 일이 일어날까요?
+- `@Bean` 애너테이션을 붙여 메서드가 리턴하는 객체를 bean이라는 싱글턴 객체로 등록합니다. 이렇게 만들어진 객체는 싱글턴이므로 다른 곳에서 사용할 수 있게 됩니다.
+- `@Bean` 처리를 위해 클래스에 `@Configuration` 애너테이션을 붙여줍니다.
 - 애플리케이션 컨텍스트가 로딩될 때, Spring Boot가 `@Configuration`이 붙은 클래스를 찾아가 `@Bean`이 붙은 `CommandLineRunner` bean을 생성해줍니다.
-    - 주: Spring Boot에서는 `@Bean` 애너테이션을 붙여 bean이라는 싱글턴 객체로 등록합니다. 이렇게 만들어진 객체는 싱글턴이므로 다른 곳에서 사용할 수 있게 됩니다.
+    - `@SpringBootApplication`는 `SpringBootConfiguration` + `@ComponentScan` + `@EnableAutoConfiguration`가 합쳐진 구조인데, 이 중 `@ComponentScan`을 통해 `@Configuration` 애너테이션이 붙어 있는 클래스의 패키지를 스캔하고, 이 중 `@Bean`이 달린 메서드를 통해 bean으로 등록합니다.
 - 두 개의 `Employee` 엔티티를 만들고 `EmployeeRepository`에 저장할 것입니다.
 - `@Slf4j`는 Lombok 애너테이션으로, Slf4j 기반의 `LoggerFactory`를 `log`로 자동 생성하여 새롭게 생성된 `Employee`에 대한 로그를 기록하도록 해줍니다.
 
@@ -139,7 +140,7 @@ class LoadDatabase {
 
 # HTTP is the Platform
 
-저장소를 웹 레이어로 감싸기 위해서 이제 Spring MVC을 건드려야 합니다. Spring Boot 덕분에 환경을 마련하는 코드는 아주 짧게 완성이 될 것입니다. 대신 우리는 동작에 초점을 맞춰보겠습니다:
+저장소를 웹 레이어로 감싸기 위해서 이제 Spring MVC을 건드려야 합니다. Spring Boot 덕분에 그런 환경을 마련하는 코드는 아주 짧게 완성이 될 것입니다. 대신 우리는 동작 자체에 초점을 맞춰보겠습니다:
 
 `nonrest/src/main/java/payroll/EmployeeController.java`
 ```java
@@ -207,8 +208,8 @@ class EmployeeController {
 }
 ```
 
-- 클래스 선언에 있는 `@RestController`는 각 메서드의 리턴 데이터가 템플릿에 렌더링되지 않는 대신 response body에 직접 쓰여지게 된다는 것을 의미합니다.
-    - 주: `@RestController`는 RESTful 컨트롤러로, Spring MVC 컨트롤러인 `@Controller`와 `@ResponseBody`를 합쳐놓은 애너테이션입니다. `@Controller`의 경우 ViewResolver를 통해 text/html 타입의 응답을 해서 View Page에 출력됩니다. 반면 `@RestController`의 경우 내부에 `@ResponseBody`가 포함되어 있는데, 이는 MessageConverter를 통해서 application/json, text/plain 등 알맞은 형태로 응답을 해서 HTTP response body에 직접 쓰여지게 됩니다. 다시 말해, `@Controller`는 View Page를 리턴하지만, `@RestController`는 객체를 반환하기만 하면 데이터가 HTTP Response Body에 직접 작성되는 것입니다.
+- 클래스 선언에 있는 `@RestController`는 클래스 안의 메서드들의 리턴 데이터가 템플릿에 렌더링되지 않는 대신 response body에 직접 쓰여지게 된다는 것을 의미합니다.
+    - 주: `@RestController`는 RESTful 컨트롤러로, Spring MVC 컨트롤러인 `@Controller`와 `@ResponseBody`를 합쳐놓은 애너테이션입니다. `@Controller`의 경우 ViewResolver를 통해 text/html 타입의 응답을 해서 View Page에 출력됩니다. 반면 `@RestController`의 경우 내부에 `@ResponseBody`가 작용하여, MessageConverter를 통해서 application/json, text/plain 등 알맞은 형태로 응답을 해서 HTTP response body에 직접 쓰여지게 됩니다. 다시 말해, `@Controller`는 View Page를 리턴하지만, `@RestController`는 객체를 반환하기만 하면 데이터가 HTTP Response Body에 직접 작성되는 것입니다.
 - `EmployeeRepository`는 생성자에 의해 컨트롤러에 주입됩니다.
 - 각 작업에 대한 애너테이션이 존재합니다 (`@GetMapping`, `@PostMapping`, `@PutMapping`, `@DeleteMapping`이 각각 HTTP의 `GET`, `POST`, `PUT`, `DELETE` 호출에 대응됩니다).
 - `EmployeeNotFoundException`은 직원을 검색했는데 결과가 나오지 않았을 때를 의미하는 예외입니다.
@@ -257,18 +258,25 @@ class EmployeeNotFoundAdvice {
 IDE에서 애플리케이션을 띄우기 위해서는 `PayrollApplication`의 `public static void main`에 우클릭을 하거나,
 
 Spring Initializr는 maven 래퍼를 사용하므로 다음과 같이 입력합니다:
+
 ```console
 $ ./mvnw clean spring-boot:run
 ```
+
 다른 방법으로는, 이미 설치된 maven 버전을 사용해 다음과 같이 입력합니다:
+
 ```console
 $ mvn clean spring-boot:run
 ```
+
 앱이 시작되면 곧바로 내부를 조사해볼 수 있습니다.
+
 ```console
 $ curl -v localhost:8080/employees
 ```
+
 이는 다음과 같은 결과를 줄 것입니다:
+
 ```console
 *   Trying ::1...
 * TCP_NODELAY set
@@ -286,13 +294,17 @@ $ curl -v localhost:8080/employees
 * Connection #0 to host localhost left intact
 [{"id":1,"name":"Bilbo Baggins","role":"burglar"},{"id":2,"name":"Frodo Baggins","role":"thief"}]
 ```
+
 여기서 간단한 서식으로 pre-load된 데이터들을 볼 수 있습니다.
 
 만약 다음과 같이 존재하지 않는 유저에 대한 쿼리를 날리게 된다면...
+
 ```console
 $ curl -v localhost:8080/employees/99
 ```
+
 이런 결과를 보게 되겠죠:
+
 ```console
 *   Trying ::1...
 * TCP_NODELAY set
@@ -310,26 +322,32 @@ $ curl -v localhost:8080/employees/99
 * Connection #0 to host localhost left intact
 Could not find employee 99
 ```
+
 이 메시지는 HTTP 404 에러를 지정 메시지인 `Could not find employee 99`와 함께 잘 보여줍니다.
 
 실시간 코딩된 결과를 보여주는 것도 쉽습니다:
+
 ```console
 $ curl -X POST localhost:8080/employees -H 'Content-type:application/json' -d '{"name": "Samwise Gamgee", "role": "gardener"}'
 ```
+
 라고 하면 새로운 `Employee` 데이터를 만들어 다음과 같은 내용을 다시 전달해 줍니다.
+
 ```console
 {"id":3,"name":"Samwise Gamgee","role":"gardener"}
 ```
+
 그리고 이 유저를 이렇게 바꿀 수 있죠:
+
 ```console
 $ curl -X PUT localhost:8080/employees/3 -H 'Content-type:application/json' -d '{"name": "Samwise Gamgee", "role": "ring bearer"}'
 ```
+
 그러면 다음과 같이 업데이트 됩니다:
+
 ```console
 {"id":3,"name":"Samwise Gamgee","role":"ring bearer"}
 ```
-
-> 당신이 어떻게 제작할것인가에 따라 서비스에 큰 영향을 미칠 수 있습니다. 이 경우, 업데이트보다 교체 (replace)라고 설명하는 것이 적합합니다. 예를 들어, 이름이 제공되지 않았다면 무효화되었을 겁니다.
 
 그리고 삭제도 할 수 있습니다:
 ```console
@@ -350,11 +368,11 @@ $ curl -X PUT localhost:8080/employees/3 -H 'Content-type:application/json' -d '
 
 Roy Fielding이 다음과 같이 쓴 글을 본다면 REST와 RPC의 차이점에 대한 단서를 더 알아낼 수 있을 겁니다:
 
-> 나는 HTTP 기반 인터페이스를 모두 REST API라고 부르는 사람들이 너무 많아서 좌절감이 든다. 오늘의 예시는 SocialSite REST API다. 이건 RPC다. RPC라고 소리치고 있다. 디스플레이에 커플링이 너무 많아서 미성년자 관람 불가 등금을 매겨야 할 정도다.
+> 나는 HTTP 기반 인터페이스를 모두 REST API라고 부르는 사람들이 너무 많아서 좌절감이 든다. 오늘의 예시는 SocialSite REST API다. 이건 RPC다. RPC라고 소리치고 있다. 디스플레이에 커플링이 너무 많아서 미성년자 관람 불가 등급을 매겨야 할 정도다.
 
-> 하이퍼텍스트가 제약 조건이라는 개념에서 REST 아키텍처 스타일을 명확히 하려면 어떻게 해야할까? 즉, 애플리케이션 상태 엔진이, (그리고 그로인해 API가,) 하이퍼텍스트에 의해 구동되지 않는 경우 RESTful이 될 수 없으며 REST API가 될 수 없다. 그런거다. 어딘가 수정해야 할 잘못된 메뉴얼이 있나?
+> 하이퍼텍스트가 제약 조건이라는 개념에서 REST 아키텍처 스타일을 명확히 하려면 어떻게 해야할까? 즉, 애플리케이션 상태 엔진이, (그리고 그로인해 API가,) 하이퍼텍스트에 의해 구동되지 않는 경우 RESTful이 될 수 없으며 REST API가 될 수 없다. 그런거다. 어딘가 수정해야 할 잘못된 매뉴얼이 있나?
 
-우리의 구현에서 하이퍼미디어를 넣지 않아서 생기는 부작용은, 클라이언트가 API를 탐색하기 위해 "반드시" URI들을 하드코딩해야 한다는 점입니다. 이는 이커머스의 상승을 집어삼켰던 불안정한 본질과 같은 결과로 이어지게 됩니다. 이는 우리의 JSON 출력이 조금 수정되어야 한다는 걸 의미합니다.
+우리의 구현에서 하이퍼미디어를 넣지 않아서 생기는 부작용은, 클라이언트가 API를 탐색하기 위해서는 **"반드시" URI들을 하드코딩해야 한다는 점** 입니다. 이는 전자상거래의 상승을 집어삼켰던 불안정한 본질과 같은 결과로 이어지게 됩니다. 이는 우리의 JSON 출력이 조금 수정되어야 한다는 걸 의미합니다.
 
 Spring HATEOAS를 소개합니다. 이 프로젝트는 하이퍼미디어 기반 출력물의 작성을 돕기 위해 만들어졌습니다. 우리 서비스를 RESTful하도록 업그레이드하기 위해서, 빌드 파일에 다음 구문을 넣습니다 (주: 의존성 등 빌드 설정을 담당하는 `pom.xml`에 의존성을 추가하는 작업입니다):
 
@@ -391,11 +409,12 @@ import org.springframework.hateoas.Resource;
 import org.springframework.hateoas.Resources;
 ```
 
-이는 우리가 원래 갖고 있었던 점과 매우 비슷하지만, 몇몇 부분이 바뀌었습니다:
+원래 코드와 매우 비슷하지만, 몇몇 부분이 바뀌었습니다:
 
-- 메서드의 리턴 타입이 `Employee`에서 `Resource<Employee>`로 바뀌었습니다. `Resource<T>`는 Spring HATEOAS의 제네릭 컨테이너로, 데이터 뿐만 아니라 링크들도 담게 됩니다.
+- 메서드의 리턴 타입이 `Employee`에서 `Resource<Employee>`로 바뀌었습니다.
+    - `Resource<T>`는 Spring HATEOAS의 제네릭 컨테이너로, 데이터 뿐만 아니라 링크들도 담게 됩니다.
 - `linkTo(methodOn(EmployeeController.class).one(id)).withSelfRel()`은 Spring HATEOAS에게 `EmployeeController`의 `one()` 메서드에 링크를 만들도록 요청하고 self 링크라는 것을 표시합니다.
-- `linkTo(methodOn(EmployeeController.class).all()).withRel("employees")`는 Spring HATEOAS에게 `all()`이라는 aggregate root에 링크를 만들도록 요청하고, "employees"라고 부릅니다.
+- `linkTo(methodOn(EmployeeController.class).all()).withRel("employees")`는 Spring HATEOAS에게 `all()`이라는 aggregate root에 링크를 만들도록 요청하고, 그 링크를 "employees"라고 부릅니다.
 
 "링크를 만든다"는게 무슨 뜻일까요? Spring HATEOAS의 핵심 타입 중 하나가 `Link`입니다. 여기엔 URI와 rel (관계)이 포함되어 있습니다. 링크는 웹에 힘을 실어주는 것입니다. World Wide Web 전에, 다른 문서 시스템은 정보나 링크들을 렌더링해줬겠지만, 웹을 한데 모아준 것은 바로 "데이터를 가진" 문서의 링크였습니다.
 
@@ -419,11 +438,12 @@ Roy Fielding은 웹을 성공적으로 만들었던 기술로 API를 만드는 �
   }
 }
 ```
-위는 비압축 출력물로, 이전에 봤던 데이터 요소 (`id`, `name`, `role`) 뿐만 아니라 두 개의 URI를 가진 `_links`를 보여줍니다. 이 전체 문서는 HAL을 이용해 서식화되었습니다.
+위는 비압축 출력물로, 이전에 봤던 데이터 요소 (`id`, `name`, `role`) 뿐만 아니라 두 개의 URI를 가진 `_links`를 보여줍니다. 이 전체 문서는 HAL (Hypertext Application Language)을 이용해 서식화되었습니다.
 
-HAL은 경량 미디어타입으로, 데이터 뿐만 아니라 하이퍼미디어 컨트롤의 인코딩이 가능하게 해줘 API의 다른 부분의 컨슈머들이 앞으로 탐색할 수 있다는 것을 알려줍니다. 이 경우, "self" 링크 (코드의 `this`와 비슷한 개념)와 aggregate root에 대한 링크가 있습니다.
+HAL은 경량 미디어타입으로, 데이터 뿐만 아니라 하이퍼미디어 컨트롤의 인코딩이 가능하게 해줘 API의 다른 부분의 컨슈머들이 링크를 통해 탐색할 수 있다는 것을 알려줍니다. 위의 경우, "self" 링크 (코드의 `this`와 비슷한 개념)와 aggregate root에 대한 링크가 있습니다.
 
-Aggregate root 또한 RESTful로 만들기 위해서는 상위 레벨 링크를 추가해야 하는데, 그 안에도 RESTful 요소가 있어야 합니다.
+Aggregate root 또한 RESTful로 만들기 위해서는 (i.e., `@GetMapping("/employees")`에 대한 메서드를 RESTful로 만들기 위해서는) 상위 레벨 링크를 추가해야 하는데, 그 안에도 RESTful 요소가 있어야 합니다.
+
 `Getting an aggregate root resource`
 ```java
 @GetMapping("/employees")
@@ -439,15 +459,18 @@ Resources<Resource<Employee>> all() {
     linkTo(methodOn(EmployeeController.class).all()).withSelfRel());
 }
 ```
-와우! `repository.findAll()`이었던 메서드가 아주 커졌군요! 이제 풀어봅시다.
 
-`Resources<>`는 컬렉션들을 캡슐화하기 위한 Spring HATEOAS 컨테이너입니다. 이것도 마찬가지로 링크를 포함할 수 있도록 해줍니다. 첫 문장을 그냥 지나치면 안되겠죠. "컬렉션들을 캡슐화"한다는게 무슨 의미일까요? `Employee`의 컬렉션일까요?
+`repository.findAll()`이었던 메서드가 아주 커졌네요. 이제 풀어봅시다.
+
+`Resources<>`는 컬렉션들을 캡슐화하기 위한 Spring HATEOAS 컨테이너입니다. 이것도 마찬가지로 링크를 포함할 수 있도록 해줍니다.
+
+첫 문장을 그냥 지나치면 안되겠죠. "컬렉션들을 캡슐화"한다는게 무슨 의미일까요? `Employee`의 컬렉션을 캡슐화 한다는 것일까요?
 
 아닙니다.
 
 우리는 REST를 얘기하고 있기 때문에, `Employee` resource의 컬렉션을 캡슐화해야 합니다.
 
-그게 바로 모든 `Employee`들을 가져오지만 `Resource<Employee>` 객체의 리스트로 변환시키는 이유입니다 (Java 8 스트림 API 고마워요!)
+그렇기 때문에, 모든 `Employee`들을 가져오긴 하지만, 이들을 `Resource<Employee>`의 리스트로 변환시킵니다 (Java 8 스트림 API 고마워요!).
 
 애플리케이션을 재시작하고 aggregate root를 가져오게 되면 다음과 같은 결과를 보게 됩니다:
 
